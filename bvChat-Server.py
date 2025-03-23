@@ -1,7 +1,5 @@
 from socket import *
 import threading
-import hashlib
-import sys
 import time
 
 # run using ./bvChat-Server
