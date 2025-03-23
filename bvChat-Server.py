@@ -234,11 +234,8 @@ def handleClient(connInfo):
 
         # Idk when I should get rid of this but PyCharm is pissed off when it's gone.
         except ConnectionResetError:
-            print(f"Connection reset by {username}")
+            print(f"Connection was reset")
             break  # Exit loop when client disconnects
-        except Exception as e:
-            print(f"Error handling client {username}: {e}")
-            break  # Exit on any unexpected error
 
     # Clean up session when client disconnects
     with sessionLock:
