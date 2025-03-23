@@ -9,6 +9,7 @@ in_session = {}  # keeps track of the usernames currently logged in
 offline_msg = {}
 bans = {}
 failed_login = {}
+valid_users = {}
 
 port = 12345
 
@@ -19,10 +20,39 @@ listen_socket.listen(10)
 
 sessionLock = threading.Lock()
 
+def loadUsers(file):
+    try:
+        with open(file, "r") as f:  # open the file
+            # for every line in the txt, split the line to set both the passw and usern adding it to the dictionary
+            for line in f:
+                usern, passw = line.strip().split(" ", 1)
+                valid_users[usern] = passw
+
+    # in case the file doesn't exist (idk why it wouldn't but oh well)
+    except FileNotFoundError:
+        print("file does not exist")
+
+def checkLoginFail(username, connection, time):
+
+    # if the username is already in the failed login dictionary
+    if username in failed_login:
+        # create the 3 variable (attempts is pretty clear, 'firstTime' is the timestamp for the first failed attempt, and lockedUntil is the timestamp for when logins become available)
+        attempt, firstTime, lockedUntil = failed_login[username]
+
+        if lockedUntil and time < lockedUntil:
+            remainingTime = int(lockedUntil - time)
+            msg = "too many failed attempts, try again in {} seconds\n".format(remainingTime)  # pyCharm came in clutch with the .format() (you learn something new everyday)
+            connection.send(msg.encode())
+            connection.close()
+            return
+
+        if time - firstTime > 30:
+            failed_login[username] = (0, time, None)
+
 def broadcast(sender, msg):
     with sessionLock:
         for user, conn in in_session.items():
-            msg = str(user) + ": " + str(msg) + "\n"
+            msg = str(sender) + ": " + str(msg) + "\n"
             # ensures you aren't sending something across your own conn or if the other user has you banned
             if user != sender and sender not in bans[user]:
                 try:
@@ -53,37 +83,13 @@ def handleClient(connInfo):
 
             username, password = user_pass.split(" ", 1)
 
-            # set a variable for the current time to compare to for failed log in attepmts
+
             currTime = time.time()
-
-            # if the username is already in the failed login dictionary
-            if username in failed_login:
-                # create the 3 variable (attempts is pretty clear, 'firstTime' is the timestamp for the first failed attempt, and lockedUntil is the timestamp for when logins become available)
-                attempt, firstTime, lockedUntil = failed_login[username]
-
-                if lockedUntil and currTime < lockedUntil:
-                    remainingTime = int(lockedUntil - currTime)
-                    msg = "too many failed attempts, try again in {} seconds\n".format(remainingTime) # pyCharm came in clutch with the .format() (you learn something new everyday)
-                    clientConn.send(msg.encode())
-                    clientConn.close()
-                    return
-
-                if currTime - firstTime > 30:
-                    failed_login[username] = (0, currTime, None)
-
+            checkLoginFail(username, clientConn, currTime)
 
             # sets a dictionary of the valid usernames/passwords
-            valid_users = {}
-            try:
-                with open("users.txt", "r") as file:  # open the file
-                    # for every line in the txt, split the line to set both the passw and usern adding it to the dictionary
-                    for line in file:
-                        usern, passw = line.strip().split(" ", 1)
-                        valid_users[usern] = passw
+            loadUsers('users.txt')
 
-            # in case the file doesn't exist (idk why it wouldn't but oh well)
-            except FileNotFoundError:
-                print("file does not exist")
 
             # if both the username and password are correct and the username
             if username in valid_users.keys() and valid_users[username] == password:
@@ -141,6 +147,7 @@ def handleClient(connInfo):
                 in_session[username] = clientConn
                 clientConn.send("User creation & login successful.\n".encode())
                 clientConn.send("Message of the day is: " + MOTD + "\n".encode())
+
 
             # end of the log in checks, from here on out it's dealing with client messages being sent in and the various commands
             while True:
@@ -225,8 +232,7 @@ def handleClient(connInfo):
                         clientConn.send(
                             ("Unbanned: " + banned_user + " you may now send/receive messages from them\n").encode())
                     else:
-                        clientConn.send((
-                                            "that user is not in your bans list, please use command /ban <username> to add them if you wish\n").encode())
+                        clientConn.send(("that user is not in your bans list, please use command /ban <username> to add them if you wish\n").encode())
 
                 # Broadcasting is when everyone gets the message (since there's no special command, this is the else statement)
                 else:
@@ -234,8 +240,11 @@ def handleClient(connInfo):
 
         # Idk when I should get rid of this but PyCharm is pissed off when it's gone.
         except ConnectionResetError:
-            print(f"Connection was reset")
+            print(f"Connection reset by {username}")
             break  # Exit loop when client disconnects
+        except Exception as e:
+            print(f"Error handling client {username}: {e}")
+            break  # Exit on any unexpected error
 
     # Clean up session when client disconnects
     with sessionLock:
