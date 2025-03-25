@@ -63,7 +63,7 @@ def tell(msg, user, conn):
     parts = msg.split(" ", 2)
     if len(parts) < 3:
         # If they use the incorrect format send this
-        conn.send('Usage: /tell <username> <message>\n'.encode)
+        conn.send('Usage: /tell <username> <message>\n'.encode())
     else:
         directMessage(user, parts[1], parts[2])
 
