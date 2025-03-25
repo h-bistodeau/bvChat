@@ -48,7 +48,7 @@ def directMessage(sender, reciever, message):
     if sender in blocked.get(reciever, set()):
         # Let the sender know they are blocked
         if sender in loggedIn:
-            loggedIn.send('This user has you blocked.\n'.encode())
+            loggedIn[sender].send('This user has you blocked.\n'.encode())
         return
     # If the user recieving the message is logged in send it to them with the sender name
     if reciever in loggedIn:
@@ -81,7 +81,7 @@ def motd(conn):
     conn.send(f"{messOfTheDay}\n".encode())
 
 def help(conn):
-    conn.send(b'Available commands: /who, /exit, /tell <username> <message>, /motd, /me <emote>, /help, /block <username>, /unblock <username>\n'.encode())
+    conn.send('Available commands: /who, /exit, /tell <username> <message>, /motd, /me <emote>, /help, /block <username>, /unblock <username>\n'.encode())
 
 def me(msg, user, conn):
     emote = msg[4:].strip()
@@ -99,7 +99,7 @@ def block(msg, user, conn):
         blockUser = parts[1]
         # If the user tried to block themself make it invalid
         if blockUser == user:
-            conn.send(b'You cannot block yourself!'.encode())
+            conn.send('You cannot block yourself!'.encode())
         # If the user exists then add them to the blocked dictionary
         elif blockUser in loggedIn or blockUser in users:
             blocked[user].add(blockUser)
@@ -268,5 +268,6 @@ try:
 except KeyboardInterrupt:
     print("\nShutting down server...")
     serverSocket.close()
+
 
 
