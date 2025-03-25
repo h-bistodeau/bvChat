@@ -74,3 +74,8 @@ def handle_client(client_socket):
 
 handle_client(clientSocket)
 exit()
+
+
+
+handle_client(clientSocket)
+exit()
