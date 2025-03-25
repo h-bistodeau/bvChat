@@ -48,7 +48,7 @@ def directMessage(sender, reciever, message):
     if sender in blocked.get(reciever, set()):
         # Let the sender know they are blocked
         if sender in loggedIn:
-            loggedIn.send(b'This user has you blocked.\n')
+            loggedIn.send('This user has you blocked.\n'.encode())
         return
     # If the user recieving the message is logged in send it to them with the sender name
     if reciever in loggedIn:
@@ -63,13 +63,13 @@ def tell(msg, user, conn):
     parts = msg.split(" ", 2)
     if len(parts) < 3:
         # If they use the incorrect format send this
-        conn.send(b'Usage: /tell <username> <message>\n')
+        conn.send('Usage: /tell <username> <message>\n'.encode)
     else:
         directMessage(user, parts[1], parts[2])
 
 def exit(user, conn):
     # Disconnect the user if they type exit, make sure other users are aware
-    conn.send(b'Goodbye!\n')
+    conn.send(b'Goodbye!\n'.encode())
     del loggedIn[user]
     broadcast(f"{user} has left the chat.", "Server")
     conn.close()
@@ -81,7 +81,7 @@ def motd(conn):
     conn.send(f"{messOfTheDay}\n".encode())
 
 def help(conn):
-    conn.send(b'Available commands: /who, /exit, /tell <username> <message>, /motd, /me <emote>, /help, /block <username>, /unblock <username>\n')
+    conn.send(b'Available commands: /who, /exit, /tell <username> <message>, /motd, /me <emote>, /help, /block <username>, /unblock <username>\n'.encode())
 
 def me(msg, user, conn):
     emote = msg[4:].strip()
@@ -89,45 +89,46 @@ def me(msg, user, conn):
         # If the wrong format display this to user
         broadcast(f"*{user} {emote}", "Server")
     else:
-        conn.send(b'Usage: /me <emote>\n')
+        conn.send('Usage: /me <emote>\n'.encode())
 
 def block(msg, user, conn):
     parts = msg.split(" ", 1)
     if len(parts) != 2:
-        conn.send(b'Usage: /block <username>\n')
+        conn.send('Usage: /block <username>\n'.encode)
     else:
         blockUser = parts[1]
         # If the user tried to block themself make it invalid
         if blockUser == user:
-            conn.send(b'You cannot block yourself!')
+            conn.send(b'You cannot block yourself!'.encode())
         # If the user exists then add them to the blocked dictionary
         elif blockUser in loggedIn or blockUser in users:
             blocked[user].add(blockUser)
-            conn.send(f"You have blocked {blockUser}.\n")
+            conn.send(f"You have blocked {blockUser}.\n".encode())
         # If the user doesnt exist go here
         else:
-            conn.send(b'User not found.\n')
+            conn.send('User not found.\n'.encode())
 
 def unblock(msg, user, conn):
     # Grab the user
     parts = msg.split(" ", 1)
+
     # If invoked incorrectly let them know
-    if len(parts < 2):
-        conn.send(b'Usage: /unblock <username>\n')
+    if len(parts) < 2:
+        conn.send('Usage: /unblock <username>\n'.encode())
     # If invoked correctly
     else:
         # Grab the user
         unblockUser = parts[1]
         # If the users username dont allow
         if unblockUser == user:
-            conn.send(b'You cannot unblock yourself.\n')
+            conn.send('You cannot unblock yourself.\n'.encode())
         # If not seld then make sure it exists in the users blocked dictionary
         elif unblockUser in blocked.get(user, set()):
             blocked[user].remove(unblockUser)
-            conn.send(f"You have unblocked {unblockUser}.\n")
+            conn.send(f"You have unblocked {unblockUser}.\n".encode())
         # If the user is not blocked
         else:
-            conn.send(b'User is not blocked.\n')
+            conn.send('User is not blocked.\n'.encode())
 
 # ---------------  Main function used to handle the users upon connection to the server ------------------
 def connection(clientSock, clientAddr):
@@ -136,11 +137,14 @@ def connection(clientSock, clientAddr):
     users = loadUsers()
 
     try:
+
+        clientSock.send("please enter your username and password.\n".encode())
+
         # Grab the username and password from the client
         cliInformation = clientSock.recv(1024).decode().strip().split(" ", 1)
         # If not <username> <password> disconnect
         if len(cliInformation) != 2:
-            clientSock.send(b'Invalid format. (username password). Disconnecting.\n')
+            clientSock.send('Invalid format. (username password). Disconnecting.\n'.encode())
             clientSock.close()
             return
         # Store the user information
@@ -148,13 +152,13 @@ def connection(clientSock, clientAddr):
 
         # If the user has to many failed attempts, block them from attempting again
         if username in timeout and time.time() - timeout[username] < 120:
-            clientSock.send(b'Too many failed attempts. Try again later.\n')
+            clientSock.send('Too many failed attempts. Try again later.\n'.encode())
             clientSock.close()
             return
 
         # If the user is already logged in, do not allow another login
         if username in loggedIn:
-            clientSock.send(b'User already logged in.\n')
+            clientSock.send('User already logged in.\n'.encode())
             clientSock.close()
             return
 
@@ -167,11 +171,10 @@ def connection(clientSock, clientAddr):
                 failedLogin.pop(clientAddr[0], None)
                 blocked.setdefault(username, set())
 
-                clientSock.send(b'Welcome to the chat server!\n')
+                clientSock.send('Welcome to the chat server!\n'.encode())
                 clientSock.send(f"Message of the Day: {messOfTheDay}.\n".encode())
                 print(f"{username} has logged in.")
-                broadcast(f"{username} has joined the chat!",
-                          "Server")  # Broadcast to other users that someone new logged in
+                broadcast(f"{username} has joined the chat!","Server")  # Broadcast to other users that someone new logged in
 
                 # Check if the user has any DM's sent while disconnected
                 if username in offlineMess:
@@ -235,16 +238,16 @@ def connection(clientSock, clientAddr):
                 if len(attempts) >= 3:
                     # Set the timeout and the time it happened
                     timeout[username] = time.time()
-                    clientSock.send(b'Too many failed attempts. Try again later.\n')
+                    clientSock.send('Too many failed attempts. Try again later.\n'.encode())
                 else:
                     # If they have more attempts let them know the password was incorrect
-                    clientSock.send(b'Incorrect password.\n')
+                    clientSock.send('Incorrect password.\n'.encode())
                 clientSock.close()
         # If the user does not exist, save them and set their password
         else:
             saveUser(username, password)
             loggedIn[username] = clientSock
-            clientSock.send(b'Account created. Welcome!\n')
+            clientSock.send('Account created. Welcome!\n'.encode())
             print(f"New user {username} registered and logged in.")
 
     except:
@@ -265,4 +268,5 @@ try:
 except KeyboardInterrupt:
     print("\nShutting down server...")
     serverSocket.close()
+
 
