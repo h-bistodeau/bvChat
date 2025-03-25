@@ -2,261 +2,267 @@ from socket import *
 import threading
 import time
 
-# run using ./bvChat-Server
-# client side we need to have /ban and /unban
-MOTD = "Do what you can, with what you have, where you are. -Ben Franklin"
-in_session = {}  # keeps track of the usernames currently logged in
-offline_msg = {}
-bans = {}
-failed_login = {}
-valid_users = {}
+# Variables to keep track of user information
+userInfo = 'users.txt'  # Store users
+loggedIn = {}  # Who is logged in
+failedLogin = {}  # How many failed logins someone has
+timeout = {}
+offlineMess = {}  # Saved direct messages
+blocked = {}  # Keep track of who has blocked who
+messOfTheDay = "Welcome to the chat server!"
+port = 8008
 
-port = 12345
 
-listen_socket = socket(AF_INET, SOCK_STREAM)
-listen_socket.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
-listen_socket.bind(('', port))
-listen_socket.listen(10)
-
-sessionLock = threading.Lock()
-
-def loadUsers(file):
+# Function to load the users from the persistent file
+def loadUsers():
+    users = {}
     try:
-        with open(file, "r") as f:  # open the file
-            # for every line in the txt, split the line to set both the passw and usern adding it to the dictionary
-            for line in f:
-                usern, passw = line.strip().split(" ", 1)
-                valid_users[usern] = passw
-
-    # in case the file doesn't exist (idk why it wouldn't but oh well)
+        # Open the file and read in the usernames and passwords
+        with open(userInfo, 'r') as file:
+            for line in file:
+                username, password = line.strip().split(",")
+                users[username] = password
+    # If the file isnt found open a new one
     except FileNotFoundError:
-        print("file does not exist")
+        open(userInfo, 'w').close()
+    return users
 
-def checkLoginFail(username, connection, time):
 
-    # if the username is already in the failed login dictionary
-    if username in failed_login:
-        # create the 3 variable (attempts is pretty clear, 'firstTime' is the timestamp for the first failed attempt, and lockedUntil is the timestamp for when logins become available)
-        attempt, firstTime, lockedUntil = failed_login[username]
+# Save a user to the file
+def saveUser(username, password):
+    with open(userInfo, 'a') as file:
+        file.write(f"{username},{password}\n")
 
-        if lockedUntil and time < lockedUntil:
-            remainingTime = int(lockedUntil - time)
-            msg = "too many failed attempts, try again in {} seconds\n".format(remainingTime)  # pyCharm came in clutch with the .format() (you learn something new everyday)
-            connection.send(msg.encode())
-            connection.close()
+
+# Send a message to all users
+def broadcast(message, sender):
+    # If the user is logged in send them the message
+    for user, sock in loggedIn.items():
+        if user != sender and sender not in blocked.get(user, set()):
+            sock.send(f"{sender}: {message}\n".encode())
+
+
+# Function to send a direct message to a user
+def directMessage(sender, reciever, message):
+    # If the sender is blocked by the reciever do nothing
+    if sender in blocked.get(reciever, set()):
+        # Let the sender know they are blocked
+        if sender in loggedIn:
+            loggedIn.send(b'This user has you blocked.\n')
+        return
+    # If the user recieving the message is logged in send it to them with the sender name
+    if reciever in loggedIn:
+        loggedIn[reciever].send(f"(Direct Message from {sender}): {message}\n.".encode())
+    # If the user is not logged in save the message to the offline message dictionary
+    else:
+        offlineMess.setdefault(reciever, []).append(f"(Direct Message from {sender}): {message}\n.".encode())
+
+
+# --------- Helper functions for the 'special' commands (makes the connection function readable) -------------
+def tell(msg, user, conn):
+    parts = msg.split(" ", 2)
+    if len(parts) < 3:
+        # If they use the incorrect format send this
+        conn.send(b'Usage: /tell <username> <message>\n')
+    else:
+        directMessage(user, parts[1], parts[2])
+
+def exit(user, conn):
+    # Disconnect the user if they type exit, make sure other users are aware
+    conn.send(b'Goodbye!\n')
+    del loggedIn[user]
+    broadcast(f"{user} has left the chat.", "Server")
+    conn.close()
+
+def who(conn):
+    conn.send(f'Users online: {", ".join(loggedIn.keys())}\n'.encode())
+
+def motd(conn):
+    conn.send(f"{messOfTheDay}\n".encode())
+
+def help(conn):
+    conn.send(b'Available commands: /who, /exit, /tell <username> <message>, /motd, /me <emote>, /help, /block <username>, /unblock <username>\n')
+
+def me(msg, user, conn):
+    emote = msg[4:].strip()
+    if emote:
+        # If the wrong format display this to user
+        broadcast(f"*{user} {emote}", "Server")
+    else:
+        conn.send(b'Usage: /me <emote>\n')
+
+def block(msg, user, conn):
+    parts = msg.split(" ", 1)
+    if len(parts) != 2:
+        conn.send(b'Usage: /block <username>\n')
+    else:
+        blockUser = parts[1]
+        # If the user tried to block themself make it invalid
+        if blockUser == user:
+            conn.send(b'You cannot block yourself!')
+        # If the user exists then add them to the blocked dictionary
+        elif blockUser in loggedIn or blockUser in users:
+            blocked[user].add(blockUser)
+            conn.send(f"You have blocked {blockUser}.\n")
+        # If the user doesnt exist go here
+        else:
+            conn.send(b'User not found.\n')
+
+def unblock(msg, user, conn):
+    # Grab the user
+    parts = msg.split(" ", 1)
+    # If invoked incorrectly let them know
+    if len(parts < 2):
+        conn.send(b'Usage: /unblock <username>\n')
+    # If invoked correctly
+    else:
+        # Grab the user
+        unblockUser = parts[1]
+        # If the users username dont allow
+        if unblockUser == user:
+            conn.send(b'You cannot unblock yourself.\n')
+        # If not seld then make sure it exists in the users blocked dictionary
+        elif unblockUser in blocked.get(user, set()):
+            blocked[user].remove(unblockUser)
+            conn.send(f"You have unblocked {unblockUser}.\n")
+        # If the user is not blocked
+        else:
+            conn.send(b'User is not blocked.\n')
+
+# ---------------  Main function used to handle the users upon connection to the server ------------------
+def connection(clientSock, clientAddr):
+    # Load in the Users and declare the global variables
+    global loggedIn, failedLogin, timeout, offlineMess, blocked, users
+    users = loadUsers()
+
+    try:
+        # Grab the username and password from the client
+        cliInformation = clientSock.recv(1024).decode().strip().split(" ", 1)
+        # If not <username> <password> disconnect
+        if len(cliInformation) != 2:
+            clientSock.send(b'Invalid format. (username password). Disconnecting.\n')
+            clientSock.close()
+            return
+        # Store the user information
+        username, password = cliInformation
+
+        # If the user has to many failed attempts, block them from attempting again
+        if username in timeout and time.time() - timeout[username] < 120:
+            clientSock.send(b'Too many failed attempts. Try again later.\n')
+            clientSock.close()
             return
 
-        if time - firstTime > 30:
-            failed_login[username] = (0, time, None)
+        # If the user is already logged in, do not allow another login
+        if username in loggedIn:
+            clientSock.send(b'User already logged in.\n')
+            clientSock.close()
+            return
 
-def broadcast(sender, msg):
-    with sessionLock:
-        for user, conn in in_session.items():
-            msg = str(sender) + ": " + str(msg) + "\n"
-            # ensures you aren't sending something across your own conn or if the other user has you banned
-            if user != sender and sender not in bans[user]:
-                try:
-                    conn.send(msg.encode())
-                except:
-                    print(f"Error sending message to {user}")
+        # If the user exists continue
+        if username in users:
+            # If the password is correct continue
+            if users[username] == password:
+                # Add them to logged in and remove any failed attempts from dictionary
+                loggedIn[username] = clientSock
+                failedLogin.pop(clientAddr[0], None)
+                blocked.setdefault(username, set())
 
-def handleClient(connInfo):
+                clientSock.send(b'Welcome to the chat server!\n')
+                clientSock.send(f"Message of the Day: {messOfTheDay}.\n".encode())
+                print(f"{username} has logged in.")
+                broadcast(f"{username} has joined the chat!",
+                          "Server")  # Broadcast to other users that someone new logged in
 
-    # take in the connection info and send the inital greeting to the chatroom
-    clientConn, clientAddr = connInfo # a pair of (socket, clientAddr) from accept()
-    clientIP = clientAddr[0]
+                # Check if the user has any DM's sent while disconnected
+                if username in offlineMess:
+                    for msg in offlineMess[username]:
+                        clientSock.send(f"{msg}\n".encode())
+                    # Remove message once it is sent
+                    del offlineMess[username]
 
-    print("Received connection from %s:%d" %(clientIP, clientAddr[1])) # test check
-
-    clientConn.send("Welcome to to bvChat, please enter your username & password\n".encode())
-
-    while True:
-        try:
-            # try to receive the username and password
-            user_pass = clientConn.recv(1024).decode()
-
-            # if there is a space within the string split it there and if not send the error message and close the connection
-            if " " not in user_pass:
-                clientConn.send("invalid format please use the format <username> <password>.\n".encode())
-                clientConn.close()
-                return
-
-            username, password = user_pass.split(" ", 1)
-
-
-            currTime = time.time()
-            checkLoginFail(username, clientConn, currTime)
-
-            # sets a dictionary of the valid usernames/passwords
-            loadUsers('users.txt')
-
-
-            # if both the username and password are correct and the username
-            if username in valid_users.keys() and valid_users[username] == password:
-                with sessionLock:
-                    # if the username is already in use shut down the connection
-                    if username in in_session:
-                        clientConn.send("this session is already in use.\n".encode())
-                        clientConn.close()
-                        return
-
-                    # if it makes it past the if-statement add the username to in_session and send the message of the day
-                    in_session[username] = clientConn
-                    clientConn.send("login successful.\n".encode())
-                    clientConn.send("Message of the day is: " + MOTD + "\n".encode())
-
-                # if the user has any messages sent to them while offline send them once they log in again
-                if username in offline_msg.keys():
-                    for msg in offline_msg[username]:
-                        clientConn.send(("offline message: " + msg).encode())
-                    offline_msg[username] = []
-
-                # if there were failed log in attempts prior to this delete the user from dict.
-                if username in failed_login:
-                    del failed_login[username]
-
-            # if the username and password don't match but the username is valid
-            elif username in valid_users.keys() and valid_users[username] != password:
-
-                # check if the username needs to be added to failed login
-                if username not in failed_login:
-                    failed_login[username] = (1, currTime, None)
-
-                # if the username is already in failed_login grab the variables from the dict.
-                else:
-                    attempt, firstTime, lockedUntil = failed_login[username]
-                    attempt += 1 #increase the failed attempts var.
-
-                    # if this is the third attempt
-                    if attempt >= 3:
-                        # update the lockedUntil variable using teh current time (since this is when the 3rd attempt took place)
-                        failed_login[username] = (attempt, firstTime, currTime + 120)
-                        clientConn.send("Too many failed log in attempts you can try again in 2 minutes.\n".encode())
-                        clientConn.close()
-                        return
-
-                    #if this is attempt 2 basically, we are only updating the attempt variable in the dictionary
-                    else:
-                        failed_login[username] = (attempt, firstTime, None)
-
-            # basically if the username isn't in the system add them to users.txt and allow the connection
-            else:
-                with open("users.txt", "a") as file:
-                    file.write(username + " " + password + "\n")
-
-                in_session[username] = clientConn
-                clientConn.send("User creation & login successful.\n".encode())
-                clientConn.send("Message of the day is: " + MOTD + "\n".encode())
-
-
-            # end of the log in checks, from here on out it's dealing with client messages being sent in and the various commands
-            while True:
-                # receive a message
-                client_msg = clientConn.recv(1024).decode()
-                if not client_msg:
-                    break  # Client disconnected
-
-                # /tell - direct message to the specified username (must send to the user when they log in if they aren't currently)
-                if client_msg.startswith("/tell"):
+                # Main while loop to keep the chat itself running
+                while True:
                     try:
-                        command, destination, message = client_msg.split(" ", 2)  # split twice at the spaces, disregarding the command variable
-                    except ValueError:
-                        print("Invalid command, correct format is /tell <destination username> <message>")
+                        # Wait for client messages/instructions
+                        message = clientSock.recv(1024).decode().strip()
 
-                    msg = "Message from " + username + ": " + message + "\n"  # format the direct message a bit better
+                        # Section to handle special instructions
+                        if message.lower() == "/exit":
+                            exit(username, clientSock)
+                            break
+                        # If statement to handle DM's
+                        elif message.lower().startswith("/tell "):
+                            tell(message, username, clientSock)
 
-                    if destination in in_session:
-                        # send the message to that specific user (it's probably a thread or something idk)
-                        connection = in_session[destination]
-                        connection.send(msg.encode())
+                        # List the current online users
+                        elif message.lower() == "/who":
+                            who(clientSock)
 
-                    # if the user is not in session add it to the preexisting list of offline msgs or add the user to the dictionary
-                    else:
-                        if destination in offline_msg.keys():
-                            offline_msg[destination].append(msg)
+                        # Send the message of the day
+                        elif message.lower() == "/motd":
+                            motd(clientSock)
+
+                        # Display available commands
+                        elif message.lower() == "/help":
+                            help(clientSock)
+                        # Emote
+                        elif message.lower().startswith("/me "):
+                            me(message, username, clientSock)
+
+                        # Handles blocking users
+                        elif message.lower().startswith("/block "):
+                            block(message, username, clientSock)
+
+                        # Handles unblocking blocked users
+                        elif message.lower().startswith("/unblock "):
+                           unblock(message, username, clientSock)
+
+                        # If not a command it is a message to be broadcast to other users
                         else:
-                            offline_msg[destination] = [msg]
+                            broadcast(message, username)
 
-                # /motd - sends the message of the day again
-                elif client_msg == "/motd":
-                    clientConn.send(("Message of the day is: " + MOTD + "\n").encode())
-
-                # /me - emote message using the username
-                # Ex. /me is crashing out --> hbistodeau is crashing out
-                elif client_msg.startswith("/me"):
-                    command, message = client_msg.split(" ", 1)
-                    message = username + message + "\n"
-
-                    # send the message to the masses (broadcasting)
-                    broadcast(username, message)
-
-                # /who - lists all in-session users
-                elif client_msg == "/who":
-                    uPrint = ""  # initialize this variable as empty first
-                    with sessionLock:
-                        for u in in_session:
-                            # add on the next user in the list to the string
-                            uPrint = uPrint + u + "  "
-                    clientConn.send(("Users Online: " + uPrint + "\n").encode())
-
-                # /help - displays the list of commands
-                elif client_msg == "/help":
-                    clientConn.send("Available commands: /tell, /who, /motd, /me, /help, /exit\n".encode())
-
-                # /exit - closes connection and alerts other users they left
-                elif client_msg == "/exit":
-                    clientConn.send("Bye.\n".encode())
-                    in_session.pop(username, None)
-
-                    # send the message to other users as well
-                    exitMsg = "user " + username + " has left the chatroom"
-                    broadcast(username, exitMsg)
-                    break  # Exit loop on user logout
-
-                # right now I just have the server keeping track of the list of banned usernames
-                elif client_msg.startswith("/ban"):
-                    command, banned_user = client_msg.split(" ", 1)
-
-                    # determining if the username already has a prior list to just append to
-                    if username in bans.keys():
-                        bans[username].append(banned_user)
-                    else:
-                        bans[username] = [banned_user]
-
-                    clientConn.send(("Banned user: " + banned_user + "\n").encode())
-
-                elif client_msg.startswith("/unban"):
-                    command, banned_user = client_msg.split(" ", 1)
-                    if username in bans and banned_user in bans[username]:
-                        bans[username].remove(banned_user)
-                        clientConn.send(
-                            ("Unbanned: " + banned_user + " you may now send/receive messages from them\n").encode())
-                    else:
-                        clientConn.send(("that user is not in your bans list, please use command /ban <username> to add them if you wish\n").encode())
-
-                # Broadcasting is when everyone gets the message (since there's no special command, this is the else statement)
+                    # If someone should fail disconnect the user and make the chat aware
+                    except:
+                        del loggedIn[username]
+                        broadcast(f"{username} has disconnected.", "Server")
+                        break
+            # If the password is incorrect go here
+            else:
+                # Add to failed login
+                failedLogin.setdefault(clientAddr[0], []).append(time.time())
+                # Keep track of user attempts and if it reaches 3 give them a timeout
+                attempts = [t for t in failedLogin[clientAddr[0]] if time.time() - t < 30]
+                if len(attempts) >= 3:
+                    # Set the timeout and the time it happened
+                    timeout[username] = time.time()
+                    clientSock.send(b'Too many failed attempts. Try again later.\n')
                 else:
-                    broadcast(username, client_msg)
+                    # If they have more attempts let them know the password was incorrect
+                    clientSock.send(b'Incorrect password.\n')
+                clientSock.close()
+        # If the user does not exist, save them and set their password
+        else:
+            saveUser(username, password)
+            loggedIn[username] = clientSock
+            clientSock.send(b'Account created. Welcome!\n')
+            print(f"New user {username} registered and logged in.")
 
-        # Idk when I should get rid of this but PyCharm is pissed off when it's gone.
-        except ConnectionResetError:
-            print(f"Connection reset by {username}")
-            break  # Exit loop when client disconnects
-        except Exception as e:
-            print(f"Error handling client {username}: {e}")
-            break  # Exit on any unexpected error
+    except:
+        clientSock.close()
 
-    # Clean up session when client disconnects
-    with sessionLock:
-        in_session.pop(username, None)
-    broadcast(username, f"User {username} has left the chatroom.\n")
-    clientConn.close()
+# ---------------------  Server setup  --------------------------------------
 
+serverSocket = socket(AF_INET, SOCK_STREAM)
+serverSocket.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
+serverSocket.bind(('', port))
+serverSocket.listen(32)
+print(f"Server listening on port {port}...")
 
-running = True
-while running:
-    try:
-        threading.Thread(target=handleClient, args=(listen_socket.accept(),), daemon=True).start()
-    except KeyboardInterrupt:
-        print("\n Why'd you stop me?? :( ")
-        running = False
+try:
+    # Run the server with threads for the users
+    while True:
+        threading.Thread(target=connection, args=(serverSocket.accept()), daemon=True).start()
+except KeyboardInterrupt:
+    print("\nShutting down server...")
+    serverSocket.close()
+
