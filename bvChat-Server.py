@@ -55,7 +55,7 @@ def directMessage(sender, reciever, message):
         loggedIn[reciever].send(f"(Direct Message from {sender}): {message}\n.".encode())
     # If the user is not logged in save the message to the offline message dictionary
     else:
-        offlineMess.setdefault(reciever, []).append(f"(Direct Message from {sender}): {message}\n.".encode())
+        offlineMess.setdefault(reciever, []).append(f"(Direct Message from {sender}): {message}\n.")
 
 
 # --------- Helper functions for the 'special' commands (makes the connection function readable) -------------
@@ -268,6 +268,5 @@ try:
 except KeyboardInterrupt:
     print("\nShutting down server...")
     serverSocket.close()
-
 
 
