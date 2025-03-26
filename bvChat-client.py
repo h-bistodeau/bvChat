@@ -32,7 +32,7 @@ def recv_message(client_socket):
             print(f"\r{msg}\n", end="", flush=True)
 
             print(f"{username}: ", end="", flush=True)
-
+        # Error handling
         except ConnectionResetError:
             print("Lost connection with the server.")
             break
@@ -40,6 +40,7 @@ def recv_message(client_socket):
             print("Disconnected from server.")
             break
     client_socket.close()
+
     running = False  # ideally this should stop whatever thread this is running on
 
 
