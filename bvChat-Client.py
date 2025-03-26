@@ -1,8 +1,20 @@
+import sys
 import threading
 from socket import *
+from sys import argv
 
 clientSocket = socket(AF_INET, SOCK_STREAM)
 running = True
+
+# check to make sure that you take in the correct amount of arguments
+if len(sys.argv) != 3:
+    print("Usage: python3 bvChat-Client.py <username> <password>")
+    sys.exit(1)
+
+username = sys.argv[1]
+password = sys.argv[2]
+print(username, password)
+
 
 def recv_message(client_socket):
     global running
@@ -32,7 +44,7 @@ def recv_message(client_socket):
 
 
 def handle_client(client_socket):
-    global running
+    global running, username, password
 
     # prompt the user for the IP and Port numbers
     try:
@@ -46,6 +58,8 @@ def handle_client(client_socket):
         #attempt to connect to the server
         client_socket.connect((serverIP, int(serverPort)))
         print("Connected to server!")
+
+        client_socket.send(f"{username} {password}".encode())
 
     except Exception as e:
         print("couldn't connect to the server plz make sure you entered the IP and port correctly <3")
@@ -64,7 +78,7 @@ def handle_client(client_socket):
             client_socket.send(message.encode())
 
         except ConnectionResetError:
-            print(" I've lost connection so sorry <3 -your server")
+            print("I've lost connection so sorry <3 -your server")
             break
 
     running = False
@@ -75,7 +89,3 @@ def handle_client(client_socket):
 handle_client(clientSocket)
 exit()
 
-
-
-handle_client(clientSocket)
-exit()
