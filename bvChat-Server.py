@@ -1,4 +1,5 @@
 from socket import *
+from sys import argv
 import threading
 import time
 
@@ -138,10 +139,11 @@ def connection(clientSock, clientAddr):
 
     try:
 
-        clientSock.send("please enter your username and password.\n".encode())
+        #clientSock.send("please enter your username and password.\n".encode())
 
         # Grab the username and password from the client
         cliInformation = clientSock.recv(1024).decode().strip().split(" ", 1)
+
         # If not <username> <password> disconnect
         if len(cliInformation) != 2:
             clientSock.send('Invalid format. (username password). Disconnecting.\n'.encode())
@@ -268,5 +270,3 @@ try:
 except KeyboardInterrupt:
     print("\nShutting down server...")
     serverSocket.close()
-
-
